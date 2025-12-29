@@ -1,4 +1,76 @@
 import numpy as np
+from numba import jit, njit
+
+@njit(fastmath=True)
+def check_winner_fast(width, height, states_array, n, last_move):
+    """Optimized winner check: only check around the last move"""
+    if last_move == -1:
+        return False, -1
+    
+    player = states_array[last_move]
+    if player == -1:
+        return False, -1
+        
+    h = last_move // width
+    w = last_move % width
+    
+    # 4 directions: horizontal, vertical, 2 diagonals
+    directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+    
+    for dh, dw in directions:
+        count = 1
+        # search in one direction
+        nh, nw = h + dh, w + dw
+        while 0 <= nh < height and 0 <= nw < width and states_array[nh * width + nw] == player:
+            count += 1
+            nh += dh
+            nw += dw
+            
+        # search in the opposite direction
+        nh, nw = h - dh, w - dw
+        while 0 <= nh < height and 0 <= nw < width and states_array[nh * width + nw] == player:
+            count += 1
+            nh -= dh
+            nw -= dw
+            
+        if count >= n:
+            return True, player
+            
+    return False, -1
+
+@njit(fastmath=True)
+def get_current_state_numba(width, height, states_array, current_player, last_move, move_count):
+    """Numba optimized function to calculate current state"""
+    # Create the state directly in the final required orientation (flipped if needed)
+    # We'll stick to the original logic but make it faster
+    square_state = np.zeros((4, width, height), dtype=np.float32)
+    
+    for m in range(width * height):
+        player = states_array[m]
+        if player == -1:
+            continue
+            
+        h = m // width
+        w = m % width
+        
+        # Original code used square_state[:, ::-1, :] which is a vertical flip
+        # We can do it directly here by changing h to (height - 1 - h)
+        h_idx = height - 1 - h
+        
+        if player == current_player:
+            square_state[0][h_idx][w] = 1.0
+        else:
+            square_state[1][h_idx][w] = 1.0
+            
+    if last_move != -1:
+        h = last_move // width
+        w = last_move % width
+        square_state[2][height - 1 - h][w] = 1.0
+        
+    if move_count % 2 == 0:
+        square_state[3][:, :] = 1.0
+        
+    return square_state
 
 class Board(object):
     """
@@ -7,116 +79,48 @@ class Board(object):
     def __init__(self, width=8, height=8, n_in_row=5):
         self.width = width
         self.height = height
-        # board states stored as a dict,
-        # key: move as location on the board,
-        # value: player as pieces type
-        self.states = {}
-        # need how many pieces in a row to win
+        self.states_array = np.full(width * height, -1, dtype=np.int32)
         self.n_in_row = n_in_row
-        self.players = [1, 2]  # player1 and player2
+        self.players = [1, 2]
+        self.move_count = 0
 
     def init_board(self, start_player=0):
         if self.width < self.n_in_row or self.height < self.n_in_row:
             raise Exception('Board width and height can not be less than {}'.format(self.n_in_row))
-        self.current_player = self.players[start_player]  # start player
+        self.current_player = self.players[start_player]
         self.available = list(range(self.width * self.height))
-        self.states = {}
+        self.states_array.fill(-1)
         self.last_move = -1
-
-    def move_to_location(self, move):
-        """
-        3*3 board's moves like:
-        6 7 8
-        3 4 5
-        0 1 2
-        and move 5's location is (1,2)
-        """
-        h = move // self.width
-        w = move % self.width
-        return [h, w]
-
-    def location_to_move(self, location):
-        if len(location) != 2:
-            return -1
-        h = location[0]
-        w = location[1]
-        move = h * self.width + w
-        if move not in range(self.width * self.height):
-            return -1
-        return move
+        self.move_count = 0
 
     def current_state(self):
         """return the board state from the perspective of the current player.
         state shape: 4*width*height
         """
-
-        square_state = np.zeros((4, self.width, self.height))
-        if self.states:
-            moves, players = np.array(list(zip(*self.states.items())))
-            move_curr = moves[players == self.current_player]
-            move_oppo = moves[players != self.current_player]
-            
-            # fill the channels with pieces
-            for m in move_curr:
-                h, w = self.move_to_location(m)
-                square_state[0][h][w] = 1.0
-            
-            for m in move_oppo:
-                h, w = self.move_to_location(m)
-                square_state[1][h][w] = 1.0
-                
-            # last move indication
-            if self.last_move != -1:
-                h, w = self.move_to_location(self.last_move)
-                square_state[2][h][w] = 1.0
-        
-        if len(self.states) % 2 == 0:
-            square_state[3][:, :] = 1.0  # indicate it's first player's turn (if using this convention)
-                                         # actually AlphaZero usually just needs history, 
-                                         # but for simple Gomoku, just current, opponent, last move, color is enough.
-        return square_state[:, ::-1, :]
+        return get_current_state_numba(
+            self.width, self.height, self.states_array, 
+            self.current_player, self.last_move, self.move_count
+        )
 
     def do_move(self, move):
-        self.states[move] = self.current_player
+        self.states_array[move] = self.current_player
         self.available.remove(move)
-        self.current_player = (
-            self.players[0] if self.current_player == self.players[1]
-            else self.players[1]
-        )
+        self.current_player = self.players[0] if self.current_player == self.players[1] else self.players[1]
         self.last_move = move
+        self.move_count += 1
+
+    def undo_move(self, move, prev_last_move):
+        """Undo a move (used in MCTS backtracking)"""
+        self.states_array[move] = -1
+        self.available.append(move) # This might break order, but MCTS doesn't care about available order
+        self.current_player = self.players[0] if self.current_player == self.players[1] else self.players[1]
+        self.last_move = prev_last_move
+        self.move_count -= 1
 
     def has_a_winner(self):
-        width = self.width
-        height = self.height
-        states = self.states
-        n = self.n_in_row
-
-        moved = list(set(range(width * height)) - set(self.available))
-        if len(moved) < self.n_in_row * 2 - 1:
+        if self.move_count < self.n_in_row * 2 - 1:
             return False, -1
-
-        for m in moved:
-            h = m // width
-            w = m % width
-            player = states[m]
-
-            if (w in range(width - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n))) == 1):
-                return True, player
-
-            if (h in range(height - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n * width, width))) == 1):
-                return True, player
-
-            if (w in range(width - n + 1) and h in range(height - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n * (width + 1), width + 1))) == 1):
-                return True, player
-
-            if (w in range(n - 1, width) and h in range(height - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n * (width - 1), width - 1))) == 1):
-                return True, player
-
-        return False, -1
+        return check_winner_fast(self.width, self.height, self.states_array, self.n_in_row, self.last_move)
 
     def game_end(self):
         """Check whether the game is ended or not"""
@@ -129,6 +133,16 @@ class Board(object):
 
     def get_current_player(self):
         return self.current_player
+
+    def copy(self):
+        """Return a copy of the board"""
+        new_board = Board(self.width, self.height, self.n_in_row)
+        new_board.current_player = self.current_player
+        new_board.available = self.available[:]
+        new_board.states_array = self.states_array.copy()
+        new_board.last_move = self.last_move
+        new_board.move_count = self.move_count
+        return new_board
 
 class Game(object):
     """game server"""
@@ -151,7 +165,7 @@ class Game(object):
             print("{0:4d}".format(i), end='')
             for j in range(width):
                 loc = i * width + j
-                p = board.states.get(loc, -1)
+                p = board.states_array[loc]
                 if p == player1:
                     print('X'.center(8), end='')
                 elif p == player2:

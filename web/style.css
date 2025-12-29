@@ -1,0 +1,187 @@
+:root {
+    --bg-color: #f0f0f0;
+    --board-color: #deb887;
+    --piece-black: #333;
+    --piece-white: #fff;
+    --grid-color: #555;
+    --shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+}
+
+.main-container {
+    display: flex;
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    gap: 2rem;
+    align-items: flex-start;
+}
+
+.sidebar {
+    width: 250px;
+    text-align: left;
+}
+
+h1 {
+    color: #444;
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+}
+
+.status {
+    font-size: 1.1rem;
+    font-weight: bold;
+    margin-bottom: 2rem;
+    padding: 0.8rem;
+    border-radius: 6px;
+    background: #eee;
+    color: #333;
+}
+
+.board-container {
+    display: inline-block;
+    padding: 8px;
+    background: #8b4513;
+    border-radius: 4px;
+}
+
+.board {
+    display: grid;
+    background-color: var(--board-color);
+    border: 2px solid var(--grid-color);
+    position: relative;
+}
+
+.cell {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    position: relative;
+    box-sizing: border-box;
+}
+
+/* Vertical line */
+.cell::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    background-color: var(--grid-color);
+    z-index: 1;
+}
+
+/* Horizontal line */
+.cell::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background-color: var(--grid-color);
+    z-index: 1;
+}
+
+/* Edge handling for lines */
+.cell.top-edge::before { top: 50%; }
+.cell.bottom-edge::before { bottom: 50%; }
+.cell.left-edge::after { left: 50%; }
+.cell.right-edge::after { right: 50%; }
+
+/* Center mark (star point) */
+.cell.center-mark::before {
+    content: "";
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background-color: var(--grid-color);
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1; /* Same as lines but drawn over them because it's defined later */
+}
+
+/* Redefine grid lines to use background instead of pseudo-elements to free them up for marks */
+/* Actually, let's just use a separate div for the dot to avoid complex pseudo-element management */
+.center-dot {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background-color: var(--grid-color);
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.cell:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.piece {
+    width: 36px; /* Slightly larger piece for better look on intersections */
+    height: 36px;
+    border-radius: 50%;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    z-index: 2;
+}
+
+.piece.black {
+    background: radial-gradient(circle at 30% 30%, #555, #000);
+}
+
+.piece.white {
+    background: radial-gradient(circle at 30% 30%, #fff, #ccc);
+}
+
+.piece.last-move::after {
+    content: "";
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background-color: #ff4444;
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+.controls button {
+    width: 100%;
+    padding: 0.8rem 1.5rem;
+    font-size: 1rem;
+    cursor: pointer;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    transition: background 0.3s;
+}
+
+.controls button:hover {
+    background-color: #45a049;
+}
+
+.controls button:active {
+    transform: translateY(2px);
+}

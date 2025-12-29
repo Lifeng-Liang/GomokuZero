@@ -1,26 +1,30 @@
+import sys
+import os
+
+# 确保当前目录在 sys.path 中，特别是在使用嵌入式 Python 时
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 import random
 import time
 import numpy as np
 import collections
 from collections import deque
-import sys
-import os
-
-# Add current directory to path for local imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from game import Board, Game
-from model import NetWrapper
-from mcts import MCTSPlayer
 import torch
 import argparse
+
+import config
+from lib.game import Board, Game
+from lib.model import NetWrapper
+from lib.mcts import MCTSPlayer
 
 class TrainPipeline:
     def __init__(self, init_model=None, use_gpu=True):
         # params of the board and the game
-        self.board_width = 8
-        self.board_height = 8
-        self.n_in_row = 5
+        self.board_width = config.BOARD_WIDTH
+        self.board_height = config.BOARD_HEIGHT
+        self.n_in_row = config.N_IN_ROW
         self.board = Board(width=self.board_width,
                            height=self.board_height,
                            n_in_row=self.n_in_row)
@@ -37,8 +41,8 @@ class TrainPipeline:
         self.play_batch_size = 1
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
-        self.check_freq = 50
-        self.game_batch_num = 1500
+        self.check_freq = config.CHECK_FREQ
+        self.game_batch_num = config.GAME_BATCH_NUM
         self.best_win_ratio = 0.0
         # num of simulations used for the pure mcts, which is used as
         # the opponent to evaluate the trained policy
@@ -78,20 +82,26 @@ class TrainPipeline:
         play_data: [(state, mcts_prob, winner_z), ..., ...]
         """
         extend_data = []
-        for state, mcts_porb, winner in play_data:
+        for state, mcts_prob, winner in play_data:
+            # state shape is (4, H, W)
+            # mcts_prob shape is (H*W,)
+            prob_grid = mcts_prob.reshape(self.board_height, self.board_width)
+            
             for i in [1, 2, 3, 4]:
                 # rotate counterclockwise
-                equi_state = np.array([np.rot90(s, i) for s in state])
-                equi_mcts_prob = np.rot90(np.flipud(
-                    mcts_porb.reshape(self.board_height, self.board_width)), i)
+                equi_state = np.rot90(state, i, axes=(1, 2))
+                # For the policy, we need to match the rotation
+                # Since state is already flip_ud, we rotate it directly
+                # The policy grid was also constructed to match the flip_ud state
+                equi_mcts_prob = np.rot90(prob_grid, i)
                 extend_data.append((equi_state,
-                                    np.flipud(equi_mcts_prob).flatten(),
+                                    equi_mcts_prob.flatten(),
                                     winner))
                 # flip horizontally
-                equi_state = np.array([np.fliplr(s) for s in equi_state])
-                equi_mcts_prob = np.fliplr(equi_mcts_prob)
-                extend_data.append((equi_state,
-                                    np.flipud(equi_mcts_prob).flatten(),
+                equi_state_flip = np.flip(equi_state, axis=2)
+                equi_mcts_prob_flip = np.fliplr(equi_mcts_prob)
+                extend_data.append((equi_state_flip,
+                                    equi_mcts_prob_flip.flatten(),
                                     winner))
         return extend_data
 
@@ -157,7 +167,8 @@ class TrainPipeline:
                 
                 if (i+1) % self.check_freq == 0:
                     print("current self-play batch: {}".format(i+1))
-                    self.policy_value_net.save_model('./current_policy.pth')
+                    save_path = config.get_model_path(self.board_width, self.board_height)
+                    self.policy_value_net.save_model(save_path)
         except KeyboardInterrupt:
             print('\n\rquit')
 
@@ -172,9 +183,9 @@ if __name__ == '__main__':
     
     model_file = args.model
     if model_file is None:
-        # Check for default checkpoint in the same directory as this script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_model = os.path.join(script_dir, 'current_policy.pth')
+        # Check for default checkpoint using config
+        default_model = config.get_model_path(config.BOARD_WIDTH, config.BOARD_HEIGHT)
+             
         if os.path.exists(default_model):
             model_file = default_model
             print(f"[Main] No model specified. Found default checkpoint: {model_file}. Resuming training...")

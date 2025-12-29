@@ -74,7 +74,7 @@ class NetWrapper(object):
                                           weight_decay=self.l2_const)
 
         if model_file:
-            net_params = torch.load(model_file, map_location=self.device)
+            net_params = torch.load(model_file, map_location=self.device, weights_only=True)
             self.policy_value_net.load_state_dict(net_params)
 
     def policy_value(self, state_batch):
@@ -82,7 +82,7 @@ class NetWrapper(object):
         input: a batch of states
         output: a batch of action probabilities and state values
         """
-        state_batch = torch.FloatTensor(np.ascontiguousarray(state_batch)).to(self.device)
+        state_batch = torch.from_numpy(np.array(state_batch)).to(self.device)
         self.policy_value_net.eval()
         with torch.no_grad():
              log_act_probs, value = self.policy_value_net(state_batch)
@@ -96,10 +96,10 @@ class NetWrapper(object):
         action and the score of the board state
         """
         legal_positions = board.available
-        current_state = np.ascontiguousarray(board.current_state().reshape(
-                -1, 4, self.board_width, self.board_height))
+        current_state = board.current_state()
         
-        state_batch = torch.FloatTensor(current_state).to(self.device)
+        # Add batch dimension and convert to torch tensor
+        state_batch = torch.from_numpy(current_state).unsqueeze(0).to(self.device)
         self.policy_value_net.eval()
         with torch.no_grad():
             log_act_probs, value = self.policy_value_net(state_batch)
@@ -135,5 +135,7 @@ class NetWrapper(object):
         
     def save_model(self, model_file):
         """ save model params to file """
-        net_params = self.policy_value_net.state_dict()  # get model params
-        torch.save(net_params, model_file)
+        # Always save in CPU format to ensure compatibility across different hardware
+        model_params = self.policy_value_net.state_dict()
+        cpu_params = {k: v.cpu() for k, v in model_params.items()}
+        torch.save(cpu_params, model_file)

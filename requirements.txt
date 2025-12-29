@@ -1,0 +1,5 @@
+numpy==1.24.3
+torch==2.9.1
+Flask==3.1.2
+flask-cors==6.0.2
+numba==0.63.1

@@ -1,18 +1,65 @@
-const boardSize = 8;
+let boardSize = 15;
 const boardEl = document.getElementById('board');
 const statusEl = document.getElementById('status');
 const resetBtn = document.getElementById('reset-btn');
 
 let currentBoard = {};
+let lastMove = null;
 let gameOver = false;
 let isThinking = false;
 
+async function loadConfig() {
+    try {
+        const response = await fetch('/config');
+        const data = await response.json();
+        boardSize = data.width;
+        initBoard();
+        resetGame();
+    } catch (error) {
+        console.error("Error loading config:", error);
+        initBoard();
+    }
+}
+
 function initBoard() {
     boardEl.innerHTML = '';
+    boardEl.style.gridTemplateColumns = `repeat(${boardSize}, 40px)`;
+    boardEl.style.gridTemplateRows = `repeat(${boardSize}, 40px)`;
+    
+    // Calculate center marks
+    const centers = [];
+    if (boardSize % 2 === 1) {
+        // Odd: single center
+        const mid = Math.floor(boardSize / 2);
+        centers.push(`${mid},${mid}`);
+    } else {
+        // Even: four centers
+        const mid2 = boardSize / 2;
+        const mid1 = mid2 - 1;
+        centers.push(`${mid1},${mid1}`);
+        centers.push(`${mid1},${mid2}`);
+        centers.push(`${mid2},${mid1}`);
+        centers.push(`${mid2},${mid2}`);
+    }
+
     for (let r = 0; r < boardSize; r++) {
         for (let c = 0; c < boardSize; c++) {
             const cell = document.createElement('div');
             cell.className = 'cell';
+            
+            // Add edge classes for intersection lines
+            if (r === 0) cell.classList.add('top-edge');
+            if (r === boardSize - 1) cell.classList.add('bottom-edge');
+            if (c === 0) cell.classList.add('left-edge');
+            if (c === boardSize - 1) cell.classList.add('right-edge');
+            
+            // Add center mark dot
+            if (centers.includes(`${r},${c}`)) {
+                const dot = document.createElement('div');
+                dot.className = 'center-dot';
+                cell.appendChild(dot);
+            }
+
             const move = r * boardSize + c;
             cell.dataset.move = move;
             cell.addEventListener('click', () => handleCellClick(move));
@@ -26,7 +73,9 @@ async function handleCellClick(move) {
 
     // Optimistic update: show player's piece immediately
     isThinking = true;
-    renderPiece(move, 1); // 1 is Black (Player)
+    lastMove = move;
+    renderBoard(currentBoard); // This will clear previous last-move mark
+    renderPiece(move, 1, true); // 1 is Black (Player), true for last move
     currentBoard[move] = 1;
     updateStatus("AI is thinking...");
 
@@ -50,6 +99,11 @@ async function handleCellClick(move) {
             return;
         }
 
+        if (data.ai_move !== undefined) {
+            lastMove = data.ai_move;
+        } else if (data.status === 'end' && data.last_move !== undefined) {
+            lastMove = data.last_move;
+        }
         renderBoard(data.board);
 
         if (data.status === 'end') {
@@ -69,12 +123,15 @@ async function handleCellClick(move) {
     }
 }
 
-function renderPiece(move, player) {
+function renderPiece(move, player, isLastMove = false) {
     const cell = document.querySelector(`.cell[data-move="${move}"]`);
     if (cell) {
         cell.innerHTML = '';
         const piece = document.createElement('div');
         piece.className = `piece ${player === 1 ? 'black' : 'white'}`;
+        if (isLastMove) {
+            piece.classList.add('last-move');
+        }
         cell.appendChild(piece);
     }
 }
@@ -83,12 +140,15 @@ function renderBoard(states) {
     currentBoard = states;
     const cells = document.querySelectorAll('.cell');
     cells.forEach(cell => {
-        const move = cell.dataset.move;
+        const move = parseInt(cell.dataset.move);
         const player = states[move];
         cell.innerHTML = '';
         if (player) {
             const piece = document.createElement('div');
             piece.className = `piece ${player === 1 ? 'black' : 'white'}`;
+            if (move === lastMove) {
+                piece.classList.add('last-move');
+            }
             cell.appendChild(piece);
         }
     });
@@ -98,18 +158,21 @@ function updateStatus(msg) {
     statusEl.textContent = msg;
 }
 
-resetBtn.addEventListener('click', async () => {
+async function resetGame() {
     try {
         await fetch('/reset', { method: 'POST' });
         gameOver = false;
         isThinking = false;
         currentBoard = {};
+        lastMove = null;
         initBoard();
         updateStatus("Your Turn (Black)");
     } catch (error) {
         console.error("Error resetting game:", error);
     }
-});
+}
+
+resetBtn.addEventListener('click', resetGame);
 
 // Start the game
-initBoard();
+loadConfig();

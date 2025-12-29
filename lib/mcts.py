@@ -1,6 +1,7 @@
 import numpy as np
-import copy
+from numba import njit
 
+@njit(fastmath=True)
 def softmax(x):
     probs = np.exp(x - np.max(x))
     probs /= np.sum(probs)
@@ -32,26 +33,41 @@ class TreeNode(object):
         plus bonus u(P).
         Return: A tuple of (action, next_node)
         """
-        return max(self._children.items(),
-                   key=lambda act_node: act_node[1].get_value(c_puct))
+        best_action = -1
+        best_value = -float('inf')
+        best_node = None
+        
+        # Pre-calculate part of the PUCT formula outside the loop
+        cp_sqrt_n = c_puct * np.sqrt(self._n_visits)
+        
+        for action, node in self._children.items():
+            # calculate_node_value logic
+            u = (cp_sqrt_n * node._P / (1 + node._n_visits))
+            value = node._Q + u
+            if value > best_value:
+                best_value = value
+                best_action = action
+                best_node = node
+        return best_action, best_node
 
     def update(self, leaf_value):
         """Update node values from leaf evaluation.
         leaf_value: the value of subtree evaluation from the current player's
         perspective.
         """
-        # Count visit.
         self._n_visits += 1
-        # Update Q, a running average of values for all visits.
-        self._Q += 1.0*(leaf_value - self._Q) / self._n_visits
+        # Q = Q + (leaf_value - Q) / n_visits
+        self._Q += 1.0 * (leaf_value - self._Q) / self._n_visits
 
     def update_recursive(self, leaf_value):
         """Like a call to update(), but applied recursively for all ancestors.
         """
-        # If it is not root, this node's parent should be updated first.
-        if self._parent:
-            self._parent.update_recursive(-leaf_value)
-        self.update(leaf_value)
+        # Iterative implementation to avoid recursion overhead
+        node = self
+        while node:
+            node.update(leaf_value)
+            leaf_value = -leaf_value
+            node = node._parent
 
     def get_value(self, c_puct):
         """Calculate and return the value for this node.
@@ -60,9 +76,8 @@ class TreeNode(object):
         c_puct: a number in (0, inf) controlling the relative impact of
         value Q, and prior probability P, on this node's score.
         """
-        self._u = (c_puct * self._P *
-                   np.sqrt(self._parent._n_visits) / (1 + self._n_visits))
-        return self._Q + self._u
+        u = (c_puct * self._P * np.sqrt(self._parent._n_visits) / (1 + self._n_visits))
+        return self._Q + u
 
     def is_leaf(self):
         """Check if leaf node (i.e. no nodes below this have been expanded).
@@ -93,15 +108,20 @@ class MCTS(object):
     def _playout(self, board):
         """Run a single playout from the root to the leaf, getting a value at
         the leaf and propagating it back through its parents.
-        State is modified in-place, so a copy must be provided.
         """
         node = self._root
+        moved_actions = []
+        
         while(1):
             if node.is_leaf():
                 break
             # Greedily select next move.
             action, node = node.select(self._c_puct)
+            
+            # Record state before move for undo
+            prev_last_move = board.last_move
             board.do_move(action)
+            moved_actions.append((action, prev_last_move))
 
         action_probs, leaf_value = self._policy(board)
         # Check for end of game
@@ -117,6 +137,10 @@ class MCTS(object):
 
         # Update value and visit count of nodes in this traversal.
         node.update_recursive(-leaf_value)
+        
+        # Backtrack: restore board state
+        for action, prev_last_move in reversed(moved_actions):
+            board.undo_move(action, prev_last_move)
 
     def get_move_probs(self, board, temp=1e-3):
         """Run all playouts sequentially and return the available actions and
@@ -124,8 +148,8 @@ class MCTS(object):
         state: the current game state
         """
         for n in range(self._n_playout):
-            state_copy = copy.deepcopy(board)
-            self._playout(state_copy)
+            # No more board.copy()! Using undo_move inside _playout
+            self._playout(board)
 
         # calc the move probabilities based on visit counts at the root node
         act_visits = [(act, node._n_visits)
